@@ -5,14 +5,13 @@ import requests
 import tarfile
 
 
-
 ##TODO: implement input treatment used in the paper (randomization and per pixel mean subtraction)
 
 class CIFAR:
     
-    def __init__(self, data_dir=None, class_num=10, batch_size=32):
+    def __init__(self, data_dir=None, class_num=10, batch_size=124):
         """
-        Parameters:
+        Arguments:
             data_dir: str, default None
                 Directory containing datasets for training and testing. 
                 If None it will download the dataset
@@ -32,13 +31,13 @@ class CIFAR:
         self.batch_size = batch_size
         self.class_num = class_num
 
-        # get files for training and testing
+        # get files for training and validation
         train_files = [name for name in os.listdir(self.data_dir) if 'data_batch' in name]
-        test_files = [name for name in os.listdir(self.data_dir) if 'test_batch' in name]
+        validation_files = [name for name in os.listdir(self.data_dir) if 'test_batch' in name]
 
         # read and merge files
-        self.train_X = []
-        self.train_Y = []
+        self.train_X, self.train_Y = [], []
+        self.validation_X, self.validation_Y = [], []
 
         for file in train_files:
             X, Y = self._unpickle_CIFAR(os.path.join(self.data_dir, file), X_field='data', Y_field='labels')
@@ -50,8 +49,15 @@ class CIFAR:
         self.train_X = np.concatenate(self.train_X, 0)
         self.train_Y = np.concatenate(self.train_Y, 0)
 
-        for file in test_files:
-            self.test_X, self.test_Y = self._unpickle_CIFAR(os.path.join(self.data_dir, file), X_field='data', Y_field='labels')
+        for file in validation_files:
+            X, Y = self._unpickle_CIFAR(os.path.join(self.data_dir, file), X_field='data', Y_field='labels')
+            # append reshaped images
+            self.validation_X.append(X)
+            # append labels
+            self.validation_Y.append(Y)
+        
+        self.validation_X = np.concatenate(self.validation_X, 0)
+        self.validation_Y = np.concatenate(self.validation_Y, 0)
 
         # shuffle the training set
         rand_index = np.random.permutation(self.train_X.shape[0])
@@ -59,21 +65,21 @@ class CIFAR:
         self.train_Y = self.train_Y[rand_index]
 
         # one hot encode the dependent variable
-        self.train_Y = np.array([self.encode_one_hot(i, self.class_num) for i in self.train_Y])
+        self.train_Y = np.array([self._encode_one_hot(i, self.class_num) for i in self.train_Y])
+        self.validation_Y = np.array([self._encode_one_hot(i, self.class_num) for i in self.validation_Y])
 
-        self.count_train, self.count_test  = 0, 0
+        self.count_train, self.count_validation  = 0, 0
 
         # split batches
         self.train_data_size = len(self.train_Y)
         self.train_num_batches = int(np.ceil(1.0 * self.train_data_size / self.batch_size))
 
-        self.test_data_size = len(self.test_Y)
-        self.test_num_batches = int(np.ceil(1.0 * self.test_data_size / self.batch_size))
-
+        self.validation_data_size = len(self.validation_Y)
+        self.validation_num_batches = int(np.ceil(1.0 * self.validation_data_size / self.batch_size))
 
     def dataset_fetcher(self, url='https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', chunks=15, dir='./dataset'):
         """Connects with the CIFAR-10 dataset url, downloads it in chunks and stores it in a pickle file
-        Parameters:
+        Arguments:
             url: str, default CIFAR-url
             chunks: int, default 15
             dir: str, default './dataset'
@@ -81,12 +87,6 @@ class CIFAR:
         file = self._download_file(url, chunks=chunks)
         self.data_dir = self._untar_CIFAR(file)
         
-    @staticmethod
-    def encode_one_hot(x, classes):
-        one_hot = np.zeros(classes)
-        one_hot[x] = 1
-        return one_hot
-
     def next_batch_train(self):
         
         next_X = self.train_X[self.count_train:self.count_train + self.batch_size]
@@ -96,25 +96,25 @@ class CIFAR:
         
         return next_X, next_Y
 
-    def next_batch_test(self):
+    def next_batch_validation(self):
         
-        next_X = self.test_X[self.count_test:self.count_test + self.batch_size]
-        next_Y = self.test_Y[self.count_test:self.count_test + self.batch_size]
+        next_X = self.validation_X[self.count_validation:self.count_validation + self.batch_size]
+        next_Y = self.validation_Y[self.count_validation:self.count_validation + self.batch_size]
         
-        self.count_test = (self.count_test + self.batch_size) % self.test_data_size
+        self.count_validation = (self.count_validation + self.batch_size) % self.validation_data_size
         
         return next_X, next_Y
 
-    def reset_counter(self, mode):
-        if mode == 'train':
-            self.count_train = 0
-        elif mode == 'test':
-            self.count_test = 0
+    def set_counter(self, value, which_set='validation'):
+        if which_set == 'train':
+            self.count_train = value
+        elif which_set == 'validation':
+            self.count_validation = value
     
     @staticmethod
     def _unpickle_CIFAR(file_dir, X_field='data', Y_field='labels'):
         """Unpickle the CIFAR dataset
-        Parameters:
+        Arguments:
             file_dir: str
                 Directory containing file
             X_field: str, default 'data'
@@ -125,7 +125,7 @@ class CIFAR:
             X: np.array, Y: np.array
         
         """
-            # unpickle files
+        # unpickle files
         with open(file_dir, 'rb') as f:
             datadict = pickle.load(f, encoding='bytes')
             
@@ -153,9 +153,9 @@ class CIFAR:
         return local_filename
     
     @staticmethod
-    def _untar_CIFAR(file, dir='./dataset'):
+    def _untar_CIFAR(file, dir='./dataset', delete=True):
         """Extracts file into directory
-        Parameters:
+        Arguments:
             file: str
                 path to file
             dir: str, default './dataset'
@@ -169,3 +169,21 @@ class CIFAR:
         if delete:
             os.remove(file)
         return os.path.join(dir, 'cifar-10-batches-py')
+    
+    @staticmethod
+    def _encode_one_hot(x, classes):
+        """One hot encode the dataset
+        Arguments:
+            x: numpy ndarray
+                Data to encode
+            classes: int
+                Number of classes in dataset
+        Returns:
+            encoded data
+        """
+        one_hot = np.zeros(classes)
+        one_hot[x] = 1
+        return one_hot
+    
+    
+    
