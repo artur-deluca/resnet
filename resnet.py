@@ -16,7 +16,6 @@ class ResNet:
         learning_rate: float, default 0.001
     """
 
-
     scope_layers = {
         16: 'conv_32x32x16_unit_{}',
         32: 'conv_16x16x32_unit_{}',
@@ -35,7 +34,7 @@ class ResNet:
         # create variable scope of initialization
         with tf.variable_scope('init'):
             model = self._conv3x3_layer(self.images, filter_shape=[3, 3, 3, current_filter_dimension], stride=1)
-            self.activation_summary(model)
+            self.tensor_summary(model)
 
         # loop through the architecture dict (scope_layers)
         for filter_dim in ResNet.scope_layers.keys():
@@ -50,18 +49,18 @@ class ResNet:
         with tf.variable_scope('output'):
             # batch normalization
             model = self._bn_layer(model)
-            self.activation_summary(model)
+            self.tensor_summary(model)
             
             # activation function
             model = tf.nn.relu(model)
-            self.activation_summary(model)
+            self.tensor_summary(model)
             
             # global average pooling
             model = tf.reduce_mean(model, [1, 2])
-            self.activation_summary(model)
+            self.tensor_summary(model)
             
             self.output = self._softmax_layer(model, filter_dim, class_num)
-            self.activation_summary(self.output)
+            self.tensor_summary(self.output)
 
         self.loss = - tf.reduce_sum(self.labels * tf.log(self.output))
         self.optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
@@ -84,6 +83,16 @@ class ResNet:
         return tf.nn.softmax(tf.matmul(layer_input, W) + b)
     
     def evaluate(self, sess, writer, dataloader, which_set, index):
+        """Evaluate the cross-entropy between the true labels and predictions
+            Arguments:
+                sess: tf Session
+                writer: tf.summary.FileWriter
+                dataloader: CIFAR loader object
+                which_set: str
+                    It must be either 'train' or 'validation'
+                index: int
+                    epoch number
+        """
         losses = np.array([])
         
         if which_set.lower()=='validation':
@@ -177,15 +186,15 @@ class ResNet:
 
         # first convolutional layer
         model = self._bn_layer(residual_input)
-        self.activation_summary(model)
+        self.tensor_summary(model)
         
         model = tf.nn.relu(model)
-        self.activation_summary(model)
+        self.tensor_summary(model)
         
         if filter_dim_in != filter_dim_out:
             padding = residual_input.get_shape().as_list()[-1] // 2
             model = self._conv3x3_layer(model, [3, 3, filter_dim_in, filter_dim_out], stride=2)
-            self.activation_summary(model)
+            self.tensor_summary(model)
             ##TODO: implement B and C methods from He et. al 2015 - arXiv:1512.03385v1
             pooled_input = tf.nn.avg_pool(residual_input, ksize=[1, 2, 2, 1],
                                       strides=[1, 2, 2, 1], padding='VALID')
@@ -193,22 +202,45 @@ class ResNet:
         
         else:
             model = self._conv3x3_layer(model, [3, 3, filter_dim_in, filter_dim_out], stride=1)
-            self.activation_summary(model)
+            self.tensor_summary(model)
             residual_unit_input_to_sum = residual_input
         
         # second conv layer
         # batch normalization
         model = self._bn_layer(model)
-        self.activation_summary(model)
+        self.tensor_summary(model)
         # activation function
         model = tf.nn.relu(model)
-        self.activation_summary(model)
+        self.tensor_summary(model)
         # convolutional layer with same dimension (in and out)
         model = self._conv3x3_layer(model, [3, 3, filter_dim_out, filter_dim_out], 1)
-        self.activation_summary(model)
+        self.tensor_summary(model)
         # return the sum of the output of the second layer with the input from the first one
         return model + residual_unit_input_to_sum
     
+    @staticmethod
+    def intialize_process(load_model=False, config=None, **kwargs):
+        """
+        Initialize tf session and saver
+        Arguments:
+            load_model: bool, default False
+            config: tf ProtocolMessage for configuration
+            path_to_file: str
+                when load_model is True, specify the .ckpt (checkpoint) file of the model
+        Returns:
+            saver: tf.saver
+            sess: tf.sess
+            epoch_index: int
+        """
+        saver = tf.train.Saver(tf.global_variables())
+        sess = tf.Session(config=config)
+
+        if load_model:
+            saver.restore(sess, kwargs['path_to_file'])
+        else:
+            sess.run(tf.global_variables_initializer())
+        return saver, sess
+        
     @staticmethod
     def _initiate_tensor(shape):
         """Initialization according to He et al. (2015) - arXiv:1502.01852v1
@@ -221,11 +253,12 @@ class ResNet:
         return tf.Variable(tf.variance_scaling_initializer()(shape))
     
     @staticmethod
-    def activation_summary(tensor):
+    def tensor_summary(tensor):
         """Adds tensor info to logs
         Arguments:
             tensor: tf Tensor
         """
         name = tensor.op.name
         tf.summary.scalar(name + '/sparsity', tf.nn.zero_fraction(tensor))
-        tf.summary.histogram(name + '/activations', tensor)
+        tf.summary.histogram(name + '/histograms', tensor)
+        
