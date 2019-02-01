@@ -5,7 +5,7 @@ Study notes and implementation in tensorflow from [He et al.'s Residual Networks
 To setup project:
  ```
 make create environment
-#activate virtual environment (either by conda or virtualenv)
+# activate virtual environment (either by conda or virtualenv)
 make requirements
 ```
 
