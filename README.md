@@ -6,6 +6,9 @@ Project Organization
 
     ├── data_loader.py           <- Dataset download and manipulation
     ├── resnet.py                <- ResNet implementation
-    ├── main.py                  <- training and evaluation
+    ├── main.py                  <- intializing, training and checkpoint saving
+    ├── test_environment.py      <- Combined with Makefile, checks if python used is 3
+    ├── requirements.txt         <- requirements file
+    ├── Makefile                 <- Use make help for more info
 
 
