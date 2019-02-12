@@ -28,6 +28,8 @@ Project Organization
     ├── main.py                  <- intializing, training and checkpoint saving
     ├── test_environment.py      <- Combined with Makefile, checks if python used is 3
     ├── requirements.txt         <- requirements file
+    ├── notes
+        └── study_notes          <- study notes in .pdf
     
 
 
