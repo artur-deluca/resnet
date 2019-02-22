@@ -1,7 +1,7 @@
 import numpy as np
 import os
 import pickle
-import tensorflow as tf
+import tensorflow as tf # pylint: disable=import-error
 
 from data_loader import CIFAR
 from resnet import ResNet
@@ -17,8 +17,9 @@ if __name__ == '__main__':
     epoch_num = 100
     eval_every = 1
     save_every = 5
+    batch_size = 124
 
-    dataloader = CIFAR(data_dir='./dataset/cifar-10-batches-py')
+    dataloader = CIFAR(data_dir='./dataset/cifar-10-batches-py', batch_size=batch_size)
     
     resnet = ResNet()
     
@@ -26,9 +27,9 @@ if __name__ == '__main__':
     config.gpu_options.allow_growth = True
     
     checkpoint_filepath = './ckpts/model.ckpt'
-    file_path =  checkpoint_filepath+'-7'
+    file_path =  checkpoint_filepath # add complement here and set `load_model` to True in initialize_sess
     
-    save, sess = resnet.intialize_process(path_to_file=file_path)
+    save, sess = resnet.intialize_sess(config=config, path_to_file=file_path)
     
     writer_train = tf.summary.FileWriter('./logs/train', sess.graph)
     writer_validation= tf.summary.FileWriter('./logs/validation', sess.graph)
@@ -42,16 +43,13 @@ if __name__ == '__main__':
             # load next batches
             batch_x, batch_y = dataloader.next_batch_train()
             # train network
-            sess.run(resnet.train_op, {resnet.images: batch_x, resnet.labels: batch_y})
-            # collect summary data
-            summary_data = sess.run(merged_summaries, {resnet.images: batch_x, resnet.labels: batch_y})
-            # write summary data
-            writer_train.add_summary(summary_data, global_step=i)
+            # credits: https://steemit.com/machine-learning/@ronny.rest/avoiding-headaches-with-tf-metrics
+            sess.run([resnet.train_op, resnet.accuracy_updt], {resnet.images: batch_x, resnet.labels: batch_y})
         
         if i % eval_every == 0:
             # evaluate train and validation set
-            resnet.evaluate(sess, writer_train, dataloader, 'train', i)
-            resnet.evaluate(sess, writer_validation, dataloader, 'validation', i)
+            resnet.evaluate(sess, writer_train, dataloader, 'train', i, batch_size)
+            resnet.evaluate(sess, writer_validation, dataloader, 'validation', i, batch_size)
         if i % save_every == 0:
             # save progres
             save.save(sess, os.path.join(checkpoint_filepath), global_step=i)

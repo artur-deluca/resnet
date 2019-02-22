@@ -1,5 +1,7 @@
+from datetime import datetime
 import numpy as np
-import tensorflow as tf
+import time
+import tensorflow as tf # pylint: disable=import-error
 
 
 ##TODO: implement weight decay
@@ -62,9 +64,15 @@ class ResNet:
             self.output = self._softmax_layer(model, filter_dim, class_num)
             self.tensor_summary(self.output)
 
-        self.loss = - tf.reduce_sum(self.labels * tf.log(self.output))
-        self.optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
-        self.train_op = self.optimizer.minimize(self.loss)
+            self.loss = - tf.reduce_sum(self.labels * tf.log(self.output + 1e-9))
+
+            tf.summary.scalar('cross-entropy', self.loss)
+
+            self.optimizer = tf.train.MomentumOptimizer(learning_rate, 0.9)
+            self.train_op = self.optimizer.minimize(self.loss)
+            
+            self.accuracy, self.accuracy_updt = tf.metrics.accuracy(tf.argmax(self.labels, axis=1), tf.argmax(self.output, axis=1), name='accuracy')
+            tf.summary.scalar('accuracy', self.accuracy)
 
     def _softmax_layer(self, layer_input, layer_dim_in, layer_dim_out):
         """Softmax layer
@@ -82,7 +90,7 @@ class ResNet:
         b = tf.Variable(tf.zeros([layer_dim_out]))
         return tf.nn.softmax(tf.matmul(layer_input, W) + b)
     
-    def evaluate(self, sess, writer, dataloader, which_set, index):
+    def evaluate(self, sess, writer, dataloader, which_set, index, batch_size=124):
         """Evaluate the cross-entropy between the true labels and predictions
             Arguments:
                 sess: tf Session
@@ -93,8 +101,7 @@ class ResNet:
                 index: int
                     epoch number
         """
-        losses = np.array([])
-        
+
         if which_set.lower()=='validation':
             # get the number of batches for the validation set
             num_dataset = dataloader.validation_num_batches
@@ -113,21 +120,29 @@ class ResNet:
 
         # reset counter to 0
         dataloader.set_counter(0, which_set)
+        num_examples_per_step = num_dataset*batch_size
 
+        start_time = time.time()
+
+        cross_entropy = 0
+        accuracy = sess.run(self.accuracy)
+        
         for _ in range(num_dataset):
             # get next batch
             batch_x, batch_y = next_batch()
             # get set prediction
-            pred_Y = sess.run(self.output, {self.images: batch_x})
-            # evalute prediction with cross-entropy
-            cross_entropy = sess.run(tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=batch_y, logits=tf.log(pred_Y))))
-            # append batch losses
-            losses = np.append(losses, cross_entropy)
+            loss = sess.run(self.loss, {self.images: batch_x, self.labels: batch_y})
+            cross_entropy += loss
+        duration = time.time() - start_time
         
-        print('{} average cross-entropy: {:.2f}'.format(which_set, losses.mean()))
+        summary = sess.run(tf.summary.merge_all(), {self.images: batch_x, self.labels: batch_y})
+
+        examples_per_sec = num_examples_per_step / duration
+        sec_per_batch = duration / batch_size
+
+        format_str = ('{}: {} - step {}, cross-entropy = {:.2f} accuracy: {:.2f}  ({:.1f} examples/sec; {:.3f} sec/batch)')
+        print(format_str.format(datetime.now(), which_set, index, cross_entropy, accuracy, examples_per_sec, sec_per_batch))
         
-        summary = tf.Summary()
-        summary.value.add(tag="cross-entropy", simple_value=losses.mean())
         writer.add_summary(summary, index)
         
         dataloader.set_counter(reset_batch_counter_to, which_set)
@@ -219,7 +234,7 @@ class ResNet:
         return model + residual_unit_input_to_sum
     
     @staticmethod
-    def intialize_process(load_model=False, config=None, **kwargs):
+    def intialize_sess(load_model=False, config=None, **kwargs):
         """
         Initialize tf session and saver
         Arguments:
@@ -238,7 +253,7 @@ class ResNet:
         if load_model:
             saver.restore(sess, kwargs['path_to_file'])
         else:
-            sess.run(tf.global_variables_initializer())
+            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
         return saver, sess
         
     @staticmethod
